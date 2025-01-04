@@ -9,4 +9,5 @@ Note: the game is like the orginal i just re-write all scripts cause its was ver
 #GameLink: https://www.roblox.com/games/79845707819475/D2#!/game-instances
 
 Used Frameworks: Knit,Trove,Maid,Roact,Signal,TableUtil
+
 Script info: all script was not published to be easily readable, No parralel Luau
