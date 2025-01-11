@@ -13,7 +13,72 @@ local Signal = require(ReplicatedStorage.Packages.Signal)
 local module = {}
 module.__index = module
 
-module.WeaponsStats = "PRIVATE"
+module.WeaponsStats = {
+	["A. Rifle"] = {ReloadTime = 1.75,MaxAmmo = 18,Ammo = 18,Rate = 0.25,Reloading = false};
+	["FF Unit"] = {ShieldHealth = 150,ShieldCooldown = 65};
+	["FirstAid"] = {HealthGiven = 75,HealthCooldown = 30};
+	["Hyperlaser"] = {ReloadTime = 1.95,MaxAmmo = 5,Ammo = 5,Rate = 1,Reloading = false};
+	["Laser rifle"] = {ReloadTime = 1.55,MaxAmmo = 18,Ammo = 18,Rate = 0.25,Reloading = false};
+	["MAC-10"] = {ReloadTime = 0.5,MaxAmmo = 12,Ammo = 12,Rate = 0.2,Reloading = false};
+	["Pistol"] = {ReloadTime = 0.75,MaxAmmo = 10,Ammo = 10,Rate = 0.15,Reloading = false};
+	["Pistol2MORE"] = {ReloadTime = 0.75,MaxAmmo = 12,Ammo = 12,Rate = 0.15,Reloading = false};
+	["Revolver"] = {ReloadTime = 1.2,MaxAmmo = 7,Ammo = 7,Rate = 0.75,Reloading = false};
+	["S. FirstAid"] = {HealthGiven = 75,HealthCooldown = 35};
+	["Shotgun"] = {ReloadTime = 2,MaxAmmo = 5,Ammo = 5,Rate = 0.95,Reloading = false};
+	["Sniper R."] = {ReloadTime = 3.5,MaxAmmo = 12,Ammo = 12,Rate = 1.5,Reloading = false};
+	AbilityWeapon = {
+		["Scythe"] = {Damage = 10,SwingRate = 0.25,
+			MagnecticBlaster = {Damage = 120,AbilityCooldown = 85},
+			CutPower = {AbilityCooldown = 25};
+			Daggers = {AbilityCooldown = 65,Damage = 100};
+			AbilityFinished = false
+		};
+	};
+	CreatedNVBatteryData = {}
+}
+
+module.SpawnNVBatteryAtLocation = function(self,position)
+	if(not position) then return end
+	local WeaponsService = Knit.GetService("WeaponsService")
+	local part = Instance.new("Part",workspace)
+	part.Position = position
+	part.Anchored = true
+	part.CanCollide = false
+	part.Size = Vector3.one
+	part.Material = "Neon"
+	part.Color = Color3.fromRGB(255,255,0)
+	part.Transparency = 0.3
+	local light = Instance.new("PointLight",part)
+	light.Color = Color3.new(0,255,0)
+	light.Brightness = 2
+	light.Shadows = true
+	light.Range = 10
+	table.insert(self.WeaponsStats.CreatedNVBatteryData,part)
+	local proxy = Instance.new("ProximityPrompt",part)
+	proxy.ActionText = "NVBattery"
+	proxy.ObjectText = "Take"
+	proxy.RequiresLineOfSight = false
+	proxy.Triggered:Connect(function(playerWhoTriggered: Player) 
+		if(playerWhoTriggered.Character:FindFirstChild("mode_selector")) then
+			return 
+		end
+		table.remove(self.WeaponsStats.CreatedNVBatteryData,table.find(self.WeaponsStats.CreatedNVBatteryData,part))
+		part:Destroy()
+		WeaponsService.Client.NVBatteryClaimedSignal:Fire(playerWhoTriggered)
+	end)
+end
+
+module.CleanNVBattery = function(self)
+	if(not self.WeaponsStats.CreatedNVBatteryData) then
+		return
+	end
+	for i,v in pairs(self.WeaponsStats.CreatedNVBatteryData) do
+		if(v) then
+			v:Destroy()
+		end
+	end
+	table.clear(self.WeaponsStats.CreatedNVBatteryData)
+end
 
 local function remove(t,value)
 	for i,v in pairs(t) do
@@ -32,8 +97,8 @@ function module:Raycast(posA,posB,params)
 	return Raycast,Intersection,Distance
 end
 
-function module:RaycastHitbox(posA,posB,params)
-	if(not posA or not posB) then return end
+function module:RaycastHitbox(posA,params)
+	if(not posA) then return end
 	local part = Instance.new("Part",workspace)
 	part.Size = Vector3.new(10,5,10);
 	part.Position = posA 
@@ -50,7 +115,7 @@ function module:RaycastHitbox(posA,posB,params)
 	local humanoid = nil
 	for i,v in pairs(array_from_part) do
 		if(v) then
-			if(v.Parent:FindFirstChild("Humanoid")) then
+			if(v.Parent:FindFirstChild("Humanoid") and v.Parent:FindFirstChild("mode_selector") == nil) then
 				humanoid = v.Parent:FindFirstChild("Humanoid")
 				break
 			end
@@ -62,9 +127,11 @@ end
 
 function module:GetRandomWeapon(parent)
 	local Weapons = ServerStorage.Weapons:GetChildren()
-	local exclude_weapons = {"Pistol","Pistol2More"}
+	local exclude_weapons = {"Pistol","Pistol2More","FirstAid","S. FirstAid"}
 	remove(Weapons,exclude_weapons[1])
 	remove(Weapons,exclude_weapons[2])
+	remove(Weapons,exclude_weapons[3])
+	remove(Weapons,exclude_weapons[4])
 	local random_weapon = Weapons[math.random(1,#Weapons)]
 	return random_weapon.Name
 end
