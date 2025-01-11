@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local SoundService = game:GetService("SoundService")
 local ContextActionService = game:GetService("ContextActionService")
 
 local Knit = require(ReplicatedStorage.Packages.Knit)
@@ -8,6 +9,8 @@ local Maid = require(ReplicatedStorage.Packages.Maid)
 local Signal = require(ReplicatedStorage.Packages.Signal)
 local Roact = require(ReplicatedStorage.Packages.Roact)
 local TableUtil = require(ReplicatedStorage.Packages.TableUtil)
+local ToolsSignal = require(script.Parent.Parent.Modules.ToolsSignal)
+local PlayersDistance = require(script.Parent.Parent.Modules.PlayersDistance)
 local PlayerEventTracker = require(ReplicatedStorage.Packages.PlayerEventTracker)
 
 local Mouse = Players.LocalPlayer:GetMouse()
@@ -45,10 +48,12 @@ local function findMax(array)
 end
 
 local function init_weapon_signal(types)
+	local SurvivorGui = Players.LocalPlayer.PlayerGui:WaitForChild("SurvivorGui")
 	local ProfileStoreService = Knit.GetService("ProfileStoreService")
 	local MarketService = Knit.GetService("MarketService")
 	local GameService = Knit.GetService("GameService")
 	local WeaponsService = Knit.GetService("WeaponsService")
+	local PropsService = Knit.GetService("PropsService")
 	WeaponsService:DestroyPlayerComponent()
 	local WeaponsConfig = WeaponsService:ConstructUserWeapon(types)
 	local WeaponsSignal = WeaponsService:SetParent()
@@ -57,30 +62,87 @@ local function init_weapon_signal(types)
 	end
 	local WeaponsStats = TableUtil.Copy(WeaponsService:copyWeaponStats(),true)
 	for i,tool : Tool in pairs(WeaponsSignal) do
-		tool.Activated:Connect(function()
+		ToolsSignal:RegisterConnection(tool.Activated,function() 
 			if(WeaponsStats[tool.Name]) then
-				if(WeaponsStats[tool.Name].Reloading ~= false) then return end
-				if(WeaponsStats[tool.Name].Ammo > 0) and (WeaponsStats[tool.Name].Rate ~= 0.0) then
+				if(WeaponsStats[tool.Name].Ammo) then
+					if(WeaponsStats[tool.Name].Ammo > 0) and (WeaponsStats[tool.Name].Rate ~= 0.0) then
+						if(WeaponsStats[tool.Name].Reloading ~= false) then return end
+						WeaponsService:GetRaycast(
+							tool:FindFirstChild("Handle"):FindFirstChildOfClass("Attachment").WorldPosition,
+							Mouse.Hit.Position,tool.Name
+						)
+						WeaponsStats[tool.Name].Ammo -= 1
+						local temp_rate = WeaponsStats[tool.Name].Rate
+						WeaponsStats[tool.Name].Rate = 0
+						if(WeaponsStats[tool.Name].Ammo and WeaponsStats[tool.Name].MaxAmmo) then
+							SurvivorGui.AmmoFrame.ammo.Text = WeaponsStats[tool.Name].Ammo .. " / " .. WeaponsStats[tool.Name].MaxAmmo
+						else
+							SurvivorGui.AmmoFrame.ammo.Text = "inf"	
+						end
+						task.delay(WeaponsStats[tool.Name].Rate,function()
+							WeaponsStats[tool.Name].Rate = temp_rate
+						end)
+					elseif(WeaponsStats[tool.Name].Ammo <= 0) then
+						if(WeaponsStats[tool.Name].Reloading ~= false) then return end
+						WeaponsStats[tool.Name].Reloading = true
+						if(tool.Handle:FindFirstChild("Reload")) then
+							SoundService:PlayLocalSound(tool.Handle:FindFirstChild("Reload"))
+						end
+						task.delay(WeaponsStats[tool.Name].ReloadTime,function()
+							WeaponsStats[tool.Name].Ammo = WeaponsStats[tool.Name].MaxAmmo
+							WeaponsStats[tool.Name].Reloading = false
+						end)
+						SurvivorGui.AmmoFrame.Visible = true
+						SurvivorGui.AmmoFrame.nme.Text = tool.Name
+						if(WeaponsStats[tool.Name].Ammo and WeaponsStats[tool.Name].MaxAmmo) then
+							SurvivorGui.AmmoFrame.ammo.Text = WeaponsStats[tool.Name].Ammo .. " / " .. WeaponsStats[tool.Name].MaxAmmo
+						else
+							SurvivorGui.AmmoFrame.ammo.Text = "inf"	
+						end
+					end
+				elseif(WeaponsStats[tool.Name].HealthGiven ~= nil) then
+					if(WeaponsStats[tool.Name].HealthCooldown ~= 0) then
+						local temp_cd = WeaponsStats[tool.Name].HealthCooldown
+						WeaponsStats[tool.Name].HealthCooldown = 0
+						PropsService.ChangePropsSignal:Fire(
+							Players.LocalPlayer.Character,
+							"Humanoid",
+							{props_name = "Health",props_value = (Players.LocalPlayer.Character.Humanoid.Health + WeaponsStats[tool.Name].HealthGiven)}
+						)
+						task.delay(temp_cd,function()
+							WeaponsStats[tool.Name].HealthCooldown = temp_cd
+						end)
+					end
+				elseif(WeaponsStats[tool.Name].ShieldCooldown ~= nil) then
+					if(WeaponsStats[tool.Name].ShieldCooldown ~= 0) then
+						local temp_cd = WeaponsStats[tool.Name].ShieldCooldown
+						WeaponsService:GetRaycast(0,0,tool.Name) --> position dont needed for the shield
+						WeaponsStats[tool.Name].ShieldCooldown = 0
+						task.delay(temp_cd,function()
+							WeaponsStats[tool.Name].ShieldCooldown = temp_cd
+						end)
+					end
+				end
+			elseif(WeaponsStats.AbilityWeapon[tool.Name]) then
+				if(WeaponsStats.AbilityWeapon[tool.Name].SwingRate ~= 0) then
+					local animation_track = Players.LocalPlayer.Character.Humanoid.Animator:LoadAnimation(tool:FindFirstChild("staffstandardswing"))
+					animation_track.Looped = false
+					animation_track:Play()
+					animation_track.Name = "attack"
+					local temp_swing_rate = WeaponsStats.AbilityWeapon[tool.Name].SwingRate
+					WeaponsStats.AbilityWeapon[tool.Name].SwingRate = 0
 					WeaponsService:GetRaycast(
-						tool:FindFirstChild("Handle"):FindFirstChildOfClass("Attachment").WorldPosition,
-						Mouse.Hit.Position,tool.Name
+						Players.LocalPlayer.Character.HumanoidRootPart.Position,
+						Vector3.new(0,0,0),
+						tool.Name
 					)
-					WeaponsStats[tool.Name].Ammo -= 1
-					local temp_rate = WeaponsStats[tool.Name].Rate
-					WeaponsStats[tool.Name].Rate = 0
-					task.delay(WeaponsStats[tool.Name].Rate,function()
-						WeaponsStats[tool.Name].Rate = temp_rate
-					end)
-				elseif(WeaponsStats[tool.Name].Ammo <= 0) then
-					WeaponsStats[tool.Name].Reloading = true
-					task.delay(WeaponsStats[tool.Name].ReloadTime,function()
-						WeaponsStats[tool.Name].Ammo = WeaponsStats[tool.Name].MaxAmmo
-						WeaponsStats[tool.Name].Reloading = false
+					task.delay(temp_swing_rate,function()
+						WeaponsStats.AbilityWeapon[tool.Name].SwingRate = temp_swing_rate
 					end)
 				end
 			end
 		end)
-		tool.Equipped:Connect(function() 
+		ToolsSignal:RegisterConnection(tool.Equipped,function(mouse: Mouse) 
 			for i,animationTrack : AnimationTrack in pairs(Players.LocalPlayer.Character.Humanoid.Animator:GetPlayingAnimationTracks()) do
 				if(animationTrack.Name == "holdstaff" or animationTrack.Name == "attack" or animationTrack.Name == "walkstaff") then
 					animationTrack.Looped = false
@@ -88,6 +150,138 @@ local function init_weapon_signal(types)
 				end
 			end
 			if(WeaponsStats[tool.Name]) then
+				SurvivorGui.AmmoFrame.Visible = true
+				SurvivorGui.AmmoFrame.nme.Text = tool.Name
+				if(WeaponsStats[tool.Name].Ammo and WeaponsStats[tool.Name].MaxAmmo) then
+					SurvivorGui.AmmoFrame.ammo.Text = WeaponsStats[tool.Name].Ammo .. " / " .. WeaponsStats[tool.Name].MaxAmmo
+				else
+					SurvivorGui.AmmoFrame.ammo.Text = "inf"
+				end
+			elseif(WeaponsStats.AbilityWeapon[tool.Name]) then
+				local startHandleTracker : AnimationTrack = Players.LocalPlayer.Character.Humanoid.Animator:LoadAnimation(tool:FindFirstChild("holdstaff"))
+				startHandleTracker.Looped = true
+				startHandleTracker:Play()
+				startHandleTracker.Name = "holdstaff"
+				PlayerEventTracker:TrackUser(Players.LocalPlayer,Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid"):GetPropertyChangedSignal("MoveDirection"),function()
+					if(Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid").MoveDirection ~= Vector3.zero) then
+						startHandleTracker:Stop()
+						startHandleTracker.Looped = false
+						startHandleTracker = Players.LocalPlayer.Character.Humanoid.Animator:LoadAnimation(tool:FindFirstChild("walkstaff"))
+						startHandleTracker.Looped = true
+						startHandleTracker:Play()
+						startHandleTracker.Name = "walkstaff"
+					else
+						startHandleTracker:Stop()
+						startHandleTracker.Looped = false
+						startHandleTracker = Players.LocalPlayer.Character.Humanoid.Animator:LoadAnimation(tool:FindFirstChild("holdstaff"))
+						startHandleTracker.Looped = true
+						startHandleTracker:Play()
+						startHandleTracker.Name = "holdstaff"	
+					end
+				end)	
+			end	
+		end)
+		ToolsSignal:RegisterConnection(tool.Unequipped,function() 
+			SurvivorGui.AmmoFrame.Visible = false
+			PlayerEventTracker:UntrackUser(Players.LocalPlayer)
+			for i,animationTrack : AnimationTrack in pairs(Players.LocalPlayer.Character.Humanoid.Animator:GetPlayingAnimationTracks()) do
+				if(animationTrack.Name == "holdstaff" or animationTrack.Name == "attack" or animationTrack.Name == "walkstaff") then
+					animationTrack.Looped = false
+					animationTrack:Stop()
+				end
+			end
+		end)
+	end
+	if(types == "juggernaut") then
+		local battery = ReplicatedStorage.Weapons["NV Batt"]:Clone()
+		battery.Parent = Players.LocalPlayer.Backpack
+		battery.Activated:Once(function() 
+			Players.LocalPlayer.PlayerGui:WaitForChild("SurvivorGui").NightVisionCharge.Value = math.clamp(Players.LocalPlayer.PlayerGui:WaitForChild("SurvivorGui").NightVisionCharge.Value + 50,0,100)
+			TweenService:Create(Players.LocalPlayer.PlayerGui:WaitForChild("SurvivorGui").NVBar.Bar,TweenInfo.new(0.2),{Size = UDim2.fromScale(1,(Players.LocalPlayer.PlayerGui:WaitForChild("SurvivorGui").NightVisionCharge.Value/100))}):Play()
+			battery:Destroy()	
+		end)
+	end
+	WeaponsService.ClaimDroppedWeapons:Connect(function(tool)
+		if(not GameService:isGameStarted()) then return end
+		if(not tool) then return end
+		ToolsSignal:RegisterConnection(tool.Activated,function()
+			if(WeaponsStats[tool.Name]) then
+				if(WeaponsStats[tool.Name].Ammo) then
+					if(WeaponsStats[tool.Name].Ammo > 0) and (WeaponsStats[tool.Name].Rate ~= 0.0) then
+						if(WeaponsStats[tool.Name].Reloading ~= false) then return end
+						WeaponsService:GetRaycast(
+							tool:FindFirstChild("Handle"):FindFirstChildOfClass("Attachment").WorldPosition,
+							Mouse.Hit.Position,tool.Name
+						)
+						WeaponsStats[tool.Name].Ammo -= 1
+						local temp_rate = WeaponsStats[tool.Name].Rate
+						WeaponsStats[tool.Name].Rate = 0
+						if(WeaponsStats[tool.Name].Ammo and WeaponsStats[tool.Name].MaxAmmo) then
+							SurvivorGui.AmmoFrame.ammo.Text = WeaponsStats[tool.Name].Ammo .. " / " .. WeaponsStats[tool.Name].MaxAmmo
+						else
+							SurvivorGui.AmmoFrame.ammo.Text = "inf"	
+						end
+						task.delay(WeaponsStats[tool.Name].Rate,function()
+							WeaponsStats[tool.Name].Rate = temp_rate
+						end)
+					elseif(WeaponsStats[tool.Name].Ammo <= 0) then
+						if(WeaponsStats[tool.Name].Reloading ~= false) then return end
+						WeaponsStats[tool.Name].Reloading = true
+						if(tool.Handle:FindFirstChild("Reload")) then
+							SoundService:PlayLocalSound(tool.Handle:FindFirstChild("Reload"))
+						end
+						task.delay(WeaponsStats[tool.Name].ReloadTime,function()
+							WeaponsStats[tool.Name].Ammo = WeaponsStats[tool.Name].MaxAmmo
+							WeaponsStats[tool.Name].Reloading = false
+						end)
+						SurvivorGui.AmmoFrame.Visible = true
+						SurvivorGui.AmmoFrame.nme.Text = tool.Name
+						if(WeaponsStats[tool.Name].Ammo and WeaponsStats[tool.Name].MaxAmmo) then
+							SurvivorGui.AmmoFrame.ammo.Text = WeaponsStats[tool.Name].Ammo .. " / " .. WeaponsStats[tool.Name].MaxAmmo
+						else
+							SurvivorGui.AmmoFrame.ammo.Text = "inf"	
+						end
+					end
+				elseif(WeaponsStats[tool.Name].HealthGiven ~= nil) then
+					if(WeaponsStats[tool.Name].HealthCooldown ~= 0) then
+						local temp_cd = WeaponsStats[tool.Name].HealthCooldown
+						WeaponsStats[tool.Name].HealthCooldown = 0
+						PropsService.ChangePropsSignal:Fire(
+							Players.LocalPlayer.Character,
+							"Humanoid",
+							{props_name = "Health",props_value = (Players.LocalPlayer.Character.Humanoid.Health + WeaponsStats[tool.Name].HealthGiven)}
+						)
+						task.delay(temp_cd,function()
+							WeaponsStats[tool.Name].HealthCooldown = temp_cd
+						end)
+					end
+				elseif(WeaponsStats[tool.Name].ShieldCooldown ~= nil) then
+					if(WeaponsStats[tool.Name].ShieldCooldown ~= 0) then
+						local temp_cd = WeaponsStats[tool.Name].ShieldCooldown
+						WeaponsService:GetRaycast(0,0,tool.Name) --> position dont needed for the shield
+						WeaponsStats[tool.Name].ShieldCooldown = 0
+						task.delay(temp_cd,function()
+							WeaponsStats[tool.Name].ShieldCooldown = temp_cd
+						end)
+					end
+				end
+			end
+		end)
+		ToolsSignal:RegisterConnection(tool.Equipped,function()
+			for i,animationTrack : AnimationTrack in pairs(Players.LocalPlayer.Character.Humanoid.Animator:GetPlayingAnimationTracks()) do
+				if(animationTrack.Name == "holdstaff" or animationTrack.Name == "attack" or animationTrack.Name == "walkstaff") then
+					animationTrack.Looped = false
+					animationTrack:Stop()
+				end
+			end
+			if(WeaponsStats[tool.Name]) then
+				SurvivorGui.AmmoFrame.Visible = true
+				SurvivorGui.AmmoFrame.nme.Text = tool.Name
+				if(WeaponsStats[tool.Name].Ammo and WeaponsStats[tool.Name].MaxAmmo) then
+					SurvivorGui.AmmoFrame.ammo.Text = WeaponsStats[tool.Name].Ammo .. " / " .. WeaponsStats[tool.Name].MaxAmmo
+				else
+					SurvivorGui.AmmoFrame.ammo.Text = "inf"
+				end
 			elseif(WeaponsStats.AbilityWeapon[tool.Name]) then
 				local startHandleTracker : AnimationTrack = Players.LocalPlayer.Character.Humanoid.Animator:LoadAnimation(tool:FindFirstChild("holdstaff"))
 				startHandleTracker.Looped = true
@@ -112,7 +306,8 @@ local function init_weapon_signal(types)
 				end)	
 			end
 		end)
-		tool.Unequipped:Connect(function() 
+		ToolsSignal:RegisterConnection(tool.Unequipped,function()
+			SurvivorGui.AmmoFrame.Visible = false
 			PlayerEventTracker:UntrackUser(Players.LocalPlayer)
 			for i,animationTrack : AnimationTrack in pairs(Players.LocalPlayer.Character.Humanoid.Animator:GetPlayingAnimationTracks()) do
 				if(animationTrack.Name == "holdstaff" or animationTrack.Name == "attack" or animationTrack.Name == "walkstaff") then
@@ -121,16 +316,7 @@ local function init_weapon_signal(types)
 				end
 			end
 		end)
-		tool.Destroying:Connect(function() 
-			PlayerEventTracker:UntrackUser(Players.LocalPlayer)
-			for i,animationTrack : AnimationTrack in pairs(Players.LocalPlayer.Character.Humanoid.Animator:GetPlayingAnimationTracks()) do
-				if(animationTrack.Name == "holdstaff" or animationTrack.Name == "attack" or animationTrack.Name == "walkstaff") then
-					animationTrack.Looped = false
-					animationTrack:Stop()
-				end
-			end
-		end)
-	end
+	end)
 end
 
 local function init_gui_signal(types)
@@ -139,6 +325,7 @@ local function init_gui_signal(types)
 	if(types == "beast") then
 		local beast_gui = Players.LocalPlayer.PlayerGui:WaitForChild("BeastGui")
 		beast_gui.Enabled = true
+		beast_gui.PlayGuide.Visible = true
 		Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid"):GetPropertyChangedSignal("MoveDirection"):Once(function(...: any) 
 			if(Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid").MoveDirection ~= Vector3.zero) then
 				beast_gui.PlayGuide.Visible = false
@@ -147,6 +334,7 @@ local function init_gui_signal(types)
 		if(MarketService:GetProductFromData("ViewPlayerName") == true) then
 			for i,plr in pairs(Players:GetPlayers()) do
 				if(plr.Character) then
+					if(plr.Name == Players.LocalPlayer.Name) then continue end
 					local ui_template = ReplicatedStorage.Templates.NameSign:Clone()
 					ui_template.Parent = plr.Character.Head
 					ui_template.AlwaysOnTop = true
@@ -157,6 +345,7 @@ local function init_gui_signal(types)
 	elseif(types ~= "beast") then
 		local SurvivorGui = Players.LocalPlayer.PlayerGui:WaitForChild("SurvivorGui")
 		SurvivorGui.Enabled = true
+		SurvivorGui.PlayGuide.Visible = true
 		Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid"):GetPropertyChangedSignal("MoveDirection"):Once(function(...: any) 
 			if(Players.LocalPlayer.Character:FindFirstChildOfClass("Humanoid").MoveDirection ~= Vector3.zero) then
 				SurvivorGui.PlayGuide.Visible = false
@@ -191,71 +380,85 @@ local function init_nightvision_signal(self,types)
 	if(not self) then return end
 	if(not types) then return end
 	if(types == "beast") then return end
+	local GameService = Knit.GetService("GameService")
+	local WeaponsService = Knit.GetService("WeaponsService")
 	local MarketService = Knit.GetService("MarketService")
 	local night_charge = Players.LocalPlayer.PlayerGui:FindFirstChild("SurvivorGui").NightVisionCharge
 	local nv_frame = Players.LocalPlayer.PlayerGui:FindFirstChild("SurvivorGui").NightVisionFrame
 	if(self.nv_initialised) then
-		if(self.nv_initialised.event) then
-			task.cancel(self.nv_initialised.event)
-			self.nv_initialised.event = nil
-		elseif(self.nv_initialised.task) then
+		ContextActionService:UnbindAction("NightVisionEvent")
+		nv_frame.Visible = false
+		if(self.nv_initialised.recv) then
+			self.nv_initialised.recv:Disconnect()
+			self.nv_initialised.recv = nil
+		end
+		if(self.nv_initialised.task) then
 			task.cancel(self.nv_initialised.task)
 			self.nv_initialised.task = nil
 		end
-		ContextActionService:UnbindAction("NightVisionEvent")
+		table.clear(self.nv_initialised)
 		self.nv_initialised = nil
-		night_charge.Value = 0
-		TweenService:Create(nv_frame.Parent.NVBar.Bar,TweenInfo.new(0.1),{
-			Size = UDim2.fromScale(1,night_charge.Value/100)
-		}):Play()
-		nv_frame.Parent.Enabled = false
-	else
-		night_charge.Value = 0
-		TweenService:Create(nv_frame.Parent.NVBar.Bar,TweenInfo.new(0.1),{
-			Size = UDim2.fromScale(1,night_charge.Value/100)
-		}):Play()
-		if(MarketService:GetProductFromData("nightvision") == true) then
-			night_charge.Value += 50
-			TweenService:Create(nv_frame.Parent.NVBar.Bar,TweenInfo.new(0.1),{
-				Size = UDim2.fromScale(1,night_charge.Value/100)
-			}):Play()
+		for i,plr_part in pairs(Players.LocalPlayer.Character:GetChildren()) do
+			if(plr_part:IsA("Tool") and plr_part.Name == "NV Batt") then
+				plr_part:Destroy()
+			end
 		end
+		for i,plr_part in pairs(Players.LocalPlayer.Backpack:GetChildren()) do
+			if(plr_part:IsA("Tool") and plr_part.Name == "NV Batt") then
+				plr_part:Destroy()
+			end
+		end
+		night_charge.Value = 0
+		TweenService:Create(nv_frame.Parent.NVBar.Bar,TweenInfo.new(0.2),{Size = UDim2.fromScale(1,(night_charge.Value/100))}):Play()
+	else
 		self.nv_initialised = {
-			task = coroutine.create(function() 
+			recv = WeaponsService.NVBatteryClaimedSignal:Connect(function()
+				if(GameService:isGameStarted() == true) then
+					local battery = ReplicatedStorage.Weapons["NV Batt"]:Clone()
+					battery.Parent = Players.LocalPlayer.Backpack
+					battery.Activated:Once(function() 
+						night_charge.Value = math.clamp(night_charge.Value+50,0,100)
+						TweenService:Create(nv_frame.Parent.NVBar.Bar,TweenInfo.new(0.2),{Size = UDim2.fromScale(1,(night_charge.Value/100))}):Play()
+						battery:Destroy()
+					end)
+				end
+			end);
+			task = coroutine.create(function()
 			end);
 		}
-		ContextActionService:BindAction("NightVisionEvent",function()
-			if(self.nv_initialised.event) then
-				task.cancel(self.nv_initialised.event)
-				self.nv_initialised.event = nil
-				self.nv_initialised.task = coroutine.create(function() 
-					if(night_charge.Value >= 100) then return end
-					while(night_charge.Value ~= 100) do
-						night_charge.Value += 1
-						TweenService:Create(nv_frame.Parent.NVBar.Bar,TweenInfo.new(0.1),{
-							Size = UDim2.fromScale(1,night_charge.Value/100)
-						}):Play()
-						task.wait(1)
+		ContextActionService:BindAction("NightVisionEvent",function(actionName: string, inputState: Enum.UserInputState, inputObject: InputObject)
+			if(inputState == Enum.UserInputState.End) then
+				if(self.nv_initialised.event) then
+					if(self.nv_initialised.task) then
+						task.cancel(self.nv_initialised.task)
+						self.nv_initialised.task = nil
 					end
-				end)
-				task.spawn(self.nv_initialised.task)
-				nv_frame.Visible = false
-			elseif(self.nv_initialised.task) then
-				task.cancel(self.nv_initialised.task)
-				self.nv_initialised.task = nil
-				self.nv_initialised.event = coroutine.create(function()
-					if(night_charge.Value <= 0) then return end
-					while(night_charge.Value ~= 0) do
-						night_charge.Value -= 1
-						TweenService:Create(nv_frame.Parent.NVBar.Bar,TweenInfo.new(0.1),{
-							Size = UDim2.fromScale(1,night_charge.Value/100)
-						}):Play()
-						task.wait(1)
-					end
+					self.nv_initialised.event = nil
+					SoundService:PlayLocalSound(nv_frame.Parent.NV_OFF)
 					nv_frame.Visible = false
-				end)
-				task.spawn(self.nv_initialised.event)
-				nv_frame.Visible = true
+				elseif(not self.nv_initialised.event) then
+					if(self.nv_initialised.task) then
+						task.cancel(self.nv_initialised.task)
+						self.nv_initialised.task = nil
+					end
+					self.nv_initialised.event = true
+					self.nv_initialised.task = coroutine.create(function(...) 
+						while(night_charge.Value ~= 0) do
+							task.wait(1)
+							math.clamp(night_charge.Value-5,0,100)
+							TweenService:Create(nv_frame.Parent.NVBar.Bar,TweenInfo.new(0.2),{Size = UDim2.fromScale(1,(night_charge.Value/100))}):Play()
+						end
+						nv_frame.Visible = false
+						TweenService:Create(nv_frame.Parent.NVBar.Bar,TweenInfo.new(0.2),{Size = UDim2.fromScale(1,(night_charge.Value/100))}):Play()
+					end)
+					task.spawn(self.nv_initialised.task)
+					SoundService:PlayLocalSound(nv_frame.Parent.NV_ON)
+					nv_frame.Visible = true
+					if(night_charge.Value <= 0) then
+						nv_frame.Visible = false
+						TweenService:Create(nv_frame.Parent.NVBar.Bar,TweenInfo.new(0.2),{Size = UDim2.fromScale(1,(night_charge.Value/100))}):Play()
+					end
+				end
 			end
 		end,true,Enum.KeyCode.G)
 		ContextActionService:SetTitle("NightVisionEvent","NV")
@@ -263,36 +466,6 @@ local function init_nightvision_signal(self,types)
 	end
 end
 
-local function init_TFlashlight_signal(self,types)
-	if(not self) then return end
-	if(not types) then return end
-	if(types == "beast") then return end
-	if(not self.temp_maid_signal) then
-		local PropsService = Knit.GetService("PropsService")
-		self.temp_maid_signal = Maid.new()
-		self.temp_maid_signal:giveTask(Players.LocalPlayer.PlayerGui:WaitForChild("SurvivorGui").TFlashLight.Activated:Connect(function(inputObject: InputObject, clickCount: number) 
-			if(Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart"):FindFirstChild("light")) then
-				if(Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart"):FindFirstChild("light").Enabled == false) then
-					PropsService.ChangePropsSignal:Fire(
-						Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart"),
-						"light",
-						{props_name = "Enabled",props_value = true}
-					)
-					Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart"):FindFirstChild("light").Enabled = true
-				else
-					PropsService.ChangePropsSignal:Fire(
-						Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart"),
-						"light",
-						{props_name = "Enabled",props_value = false}
-					)
-					Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart"):FindFirstChild("light").Enabled = false
-				end
-			end
-		end))
-	else
-		self.temp_maid_signal:clean()
-	end
-end
 
 local function init_beast_temp_health_bar(self,types)
 	if(not self) then return end
@@ -308,37 +481,44 @@ local function init_beast_temp_health_bar(self,types)
 			end),
 			event = nil
 		}
+		energyCharge.Value = 100
+		TweenService:Create(energyBar.fill,TweenInfo.new(0.2),{Size = UDim2.fromScale((energyCharge.Value / 100),1)}):Play()
 		if(self.temp_health_bar_signal.task) then
 			task.cancel(self.temp_health_bar_signal.task)
 			self.temp_health_bar_signal.task = nil
 			self.temp_health_bar_signal.task = coroutine.create(function() 
 				local percent = (energyCharge.Value / 100)
-				while(energyCharge.Value > 0) do
+				while(true) do
 					energyCharge.Value -= 1
 					percent = (energyCharge.Value / 100)
 					TweenService:Create(energyBar.fill,TweenInfo.new(0.2),{Size = UDim2.fromScale(percent,1)}):Play()
+					if(energyCharge.Value <= 0) then
+						task.spawn(function()
+							PropsService.ChangePropsSignal:Fire(
+								Players.LocalPlayer.Character,
+								"Humanoid",
+								{props_name = "Health",props_value = 0}
+							)
+						end)
+						break
+					end
 					task.wait(3)
 				end
-				PropsService.ChangePropsSignal:Fire(
-					Players.LocalPlayer.Character,
-					"Humanoid",
-					{props_name = "Health",props_value = 0}
-				)
 			end)
 			task.spawn(self.temp_health_bar_signal.task)
 		end
 		self.temp_health_bar_signal.event = WeaponsService.BeastKilledPlayerSignal:Connect(function()
-			energyCharge.Value += 20
+			math.clamp(energyCharge.Value+20,0,100)
 		end)	
 	else
+		energyCharge.Value = 100
+		TweenService:Create(energyBar.fill,TweenInfo.new(0.2),{Size = UDim2.fromScale(1,1)}):Play()
 		task.cancel(self.temp_health_bar_signal.task)
 		self.temp_health_bar_signal.task = nil
 		self.temp_health_bar_signal.event:Disconnect()
 		self.temp_health_bar_signal.event = nil
 		table.clear(self.temp_health_bar_signal)
 		self.temp_health_bar_signal = nil
-		energyCharge.Value = 100
-		TweenService:Create(energyBar.fill,TweenInfo.new(0.2),{Size = UDim2.fromScale(1,1)}):Play()
 	end
 end
 
@@ -354,8 +534,11 @@ local function init_ability(self,types)
 	local ab = require(script.Parent.Parent.Modules.Ability)
 	local getCutPowerFn = ab.cutPowerAbility
 	local getBlastPowerFn = ab.blast
-	local getSeekPlayersFn = ab.seekPlayers
-	if(not self.ability_component_data) then 
+	local getDaggersPowerFn = ab.daggers
+	if(not self.ability_component_data) then
+		TweenService:Create(Sbar.Fill,TweenInfo.new(0.2),{Size = UDim2.fromScale(1,0)}):Play()
+		SpecialFrame.perc.Text = tostring(0)	
+		SpecialFrame.AbilityCharge.Value = 0
 		self.ability_component_data = {
 			task = coroutine.create(function(...) 
 			end),
@@ -379,9 +562,10 @@ local function init_ability(self,types)
 			task.spawn(self.ability_component_data.task)
 			ContextActionService:BindAction("CutPowerAction",function(actionName: string, inputState: Enum.UserInputState, inputObject: InputObject)
 				if(inputState == Enum.UserInputState.End) then
-					if(SpecialFrame.AbilityCharge.Value >= 15 and copyWeaponsStats.AbilityWeapon.Scythe.CutPower.AbilityCooldown ~= 0) then
-						SpecialFrame.AbilityCharge.Value -= math.clamp(15,0,100)
+					if(SpecialFrame.AbilityCharge.Value >= 30 and copyWeaponsStats.AbilityWeapon.Scythe.CutPower.AbilityCooldown ~= 0) then
+						SpecialFrame.AbilityCharge.Value -= math.clamp(30,0,100)
 						TweenService:Create(Sbar.Fill,TweenInfo.new(0.2),{Size = UDim2.fromScale(1,SpecialFrame.AbilityCharge.Value/100)}):Play()
+						TweenService:Create(SpecialFrame.Sp1.ProgressBar,TweenInfo.new(WeaponsStats.AbilityWeapon.Scythe.CutPower.AbilityCooldown),{Size = UDim2.fromScale(1,1)}):Play()
 						SpecialFrame.perc.Text = tostring(SpecialFrame.AbilityCharge.Value)
 						copyWeaponsStats.AbilityWeapon.Scythe.CutPower.AbilityCooldown = 0
 						getCutPowerFn()
@@ -391,16 +575,17 @@ local function init_ability(self,types)
 					end
 				end
 			end,false,Enum.KeyCode.Z)
-			ContextActionService:BindAction("SeekPlayers",function(actionName: string, inputState: Enum.UserInputState, inputObject: InputObject)
+			ContextActionService:BindAction("Daggers",function(actionName: string, inputState: Enum.UserInputState, inputObject: InputObject)
 				if(inputState == Enum.UserInputState.End) then
-					if(SpecialFrame.AbilityCharge.Value >= 30 and copyWeaponsStats.AbilityWeapon.Scythe.SeekPlayers.AbilityCooldown ~= 0) then
-						SpecialFrame.AbilityCharge.Value -= math.clamp(30,0,100)
+					if(SpecialFrame.AbilityCharge.Value >= 70 and copyWeaponsStats.AbilityWeapon.Scythe.Daggers.AbilityCooldown ~= 0) then
+						SpecialFrame.AbilityCharge.Value -= math.clamp(70,0,100)
 						TweenService:Create(Sbar.Fill,TweenInfo.new(0.2),{Size = UDim2.fromScale(1,SpecialFrame.AbilityCharge.Value/100)}):Play()
 						SpecialFrame.perc.Text = tostring(SpecialFrame.AbilityCharge.Value)
-						copyWeaponsStats.AbilityWeapon.Scythe.SeekPlayers.AbilityCooldown = 0
-						getSeekPlayersFn()
-						task.delay(WeaponsStats.AbilityWeapon.Scythe.SeekPlayers.AbilityCooldown,function()
-							copyWeaponsStats.AbilityWeapon.Scythe.SeekPlayers.AbilityCooldown = WeaponsStats.AbilityWeapon.Scythe.SeekPlayers.AbilityCooldown
+						copyWeaponsStats.AbilityWeapon.Scythe.Daggers.AbilityCooldown = 0
+						TweenService:Create(SpecialFrame.Sp2.ProgressBar,TweenInfo.new(WeaponsStats.AbilityWeapon.Scythe.Daggers.AbilityCooldown),{Size = UDim2.fromScale(1,1)}):Play()
+						getDaggersPowerFn()
+						task.delay(WeaponsStats.AbilityWeapon.Scythe.Daggers.AbilityCooldown,function()
+							copyWeaponsStats.AbilityWeapon.Scythe.Daggers.AbilityCooldown = WeaponsStats.AbilityWeapon.Scythe.Daggers.AbilityCooldown
 						end)
 					end
 				end
@@ -411,6 +596,7 @@ local function init_ability(self,types)
 						SpecialFrame.AbilityCharge.Value -= math.clamp(90,0,100)
 						TweenService:Create(Sbar.Fill,TweenInfo.new(0.2),{Size = UDim2.fromScale(1,SpecialFrame.AbilityCharge.Value/100)}):Play()
 						SpecialFrame.perc.Text = tostring(SpecialFrame.AbilityCharge.Value)
+						TweenService:Create(SpecialFrame.Sp3.ProgressBar,TweenInfo.new(WeaponsStats.AbilityWeapon.Scythe.MagnecticBlaster.AbilityCooldown),{Size = UDim2.fromScale(1,1)}):Play()
 						copyWeaponsStats.AbilityWeapon.Scythe.MagnecticBlaster.AbilityCooldown = 0
 						getBlastPowerFn(
 							Players.LocalPlayer.Character.HumanoidRootPart.Position,
@@ -428,6 +614,7 @@ local function init_ability(self,types)
 					TweenService:Create(Sbar.Fill,TweenInfo.new(0.2),{Size = UDim2.fromScale(1,SpecialFrame.AbilityCharge.Value/100)}):Play()
 					SpecialFrame.perc.Text = tostring(SpecialFrame.AbilityCharge.Value)
 					copyWeaponsStats.AbilityWeapon.Scythe.CutPower.AbilityCooldown = 0
+					TweenService:Create(SpecialFrame.Sp1.ProgressBar,TweenInfo.new(WeaponsStats.AbilityWeapon.Scythe.CutPower.AbilityCooldown),{Size = UDim2.fromScale(1,1)}):Play()
 					getCutPowerFn()
 					task.delay(WeaponsStats.AbilityWeapon.Scythe.CutPower.AbilityCooldown,function()
 						copyWeaponsStats.AbilityWeapon.Scythe.CutPower.AbilityCooldown = WeaponsStats.AbilityWeapon.Scythe.CutPower.AbilityCooldown
@@ -435,14 +622,15 @@ local function init_ability(self,types)
 				end
 			end))
 			self.ability_component_data.maid:giveTask(SpecialFrame.Sp2.Activated:Connect(function(inputObject: InputObject, clickCount: number) 
-				if(SpecialFrame.AbilityCharge.Value >= 30 and copyWeaponsStats.AbilityWeapon.Scythe.SeekPlayers.AbilityCooldown ~= 0) then
-					SpecialFrame.AbilityCharge.Value -= math.clamp(30,0,100)
+				if(SpecialFrame.AbilityCharge.Value >= 70 and copyWeaponsStats.AbilityWeapon.Scythe.Daggers.AbilityCooldown ~= 0) then
+					SpecialFrame.AbilityCharge.Value -= math.clamp(70,0,100)
 					TweenService:Create(Sbar.Fill,TweenInfo.new(0.2),{Size = UDim2.fromScale(1,SpecialFrame.AbilityCharge.Value/100)}):Play()
 					SpecialFrame.perc.Text = tostring(SpecialFrame.AbilityCharge.Value)
-					copyWeaponsStats.AbilityWeapon.Scythe.SeekPlayers.AbilityCooldown = 0
-					getSeekPlayersFn()
-					task.delay(WeaponsStats.AbilityWeapon.Scythe.SeekPlayers.AbilityCooldown,function()
-						copyWeaponsStats.AbilityWeapon.Scythe.SeekPlayers.AbilityCooldown = WeaponsStats.AbilityWeapon.Scythe.SeekPlayers.AbilityCooldown
+					TweenService:Create(SpecialFrame.Sp2.ProgressBar,TweenInfo.new(WeaponsStats.AbilityWeapon.Scythe.Daggers.AbilityCooldown),{Size = UDim2.fromScale(1,1)}):Play()
+					copyWeaponsStats.AbilityWeapon.Scythe.Daggers.AbilityCooldown = 0
+					getDaggersPowerFn()
+					task.delay(WeaponsStats.AbilityWeapon.Scythe.Daggers.AbilityCooldown,function()
+						copyWeaponsStats.AbilityWeapon.Scythe.Daggers.AbilityCooldown = WeaponsStats.AbilityWeapon.Scythe.Daggers.AbilityCooldown
 					end)
 				end
 			end))
@@ -452,26 +640,44 @@ local function init_ability(self,types)
 					TweenService:Create(Sbar.Fill,TweenInfo.new(0.2),{Size = UDim2.fromScale(1,SpecialFrame.AbilityCharge.Value/100)}):Play()
 					SpecialFrame.perc.Text = tostring(SpecialFrame.AbilityCharge.Value)
 					copyWeaponsStats.AbilityWeapon.Scythe.MagnecticBlaster.AbilityCooldown = 0
+					TweenService:Create(SpecialFrame.Sp3.ProgressBar,TweenInfo.new(WeaponsStats.AbilityWeapon.Scythe.MagnecticBlaster.AbilityCooldown),{Size = UDim2.fromScale(1,1)}):Play()
 					getBlastPowerFn(Players.LocalPlayer.Character.HumanoidRootPart.Position,Mouse.Hit.Position)
 					task.delay(WeaponsStats.AbilityWeapon.Scythe.MagnecticBlaster.AbilityCooldown,function()
 						copyWeaponsStats.AbilityWeapon.Scythe.MagnecticBlaster.AbilityCooldown = WeaponsStats.AbilityWeapon.Scythe.MagnecticBlaster.AbilityCooldown
 					end)
 				end	
 			end))
+			self.ability_component_data.BeastVisibility = function(parent)
+				local instance = Instance.new("PointLight",parent)
+				instance.Shadows = true
+				instance.Brightness = 5
+				instance.Range = 100
+				instance.Color = Color3.fromRGB(255,0,0)
+				return instance	
+			end
+			self.ability_component_data.BeastVisibility = self.ability_component_data.BeastVisibility(Players.LocalPlayer.Character.HumanoidRootPart)
+			PlayersDistance:StartDistanceData()	
 		end
 	else
 		task.cancel(self.ability_component_data.task)
 		self.ability_component_data.task = nil
 		self.ability_component_data.maid:clean()
 		self.ability_component_data.maid = nil
+		if(self.ability_component_data.BeastVisibility) then
+			if(self.ability_component_data.BeastVisibility.Destroy) then
+				self.ability_component_data.BeastVisibility:Destroy()
+				self.ability_component_data.BeastVisibility = nil
+			end
+		end
 		table.clear(self.ability_component_data)
 		self.ability_component_data = nil
 		TweenService:Create(Sbar.Fill,TweenInfo.new(0.2),{Size = UDim2.fromScale(1,0)}):Play()
 		SpecialFrame.perc.Text = tostring(0)	
-		SpecialFrame.Parent.EnergyCharge.Value = 0
+		SpecialFrame.AbilityCharge.Value = 0
 		ContextActionService:UnbindAction("CutPowerAction")
-		ContextActionService:UnbindAction("SeekPlayers")
+		ContextActionService:UnbindAction("Daggers")
 		ContextActionService:UnbindAction("MagneticBlast")
+		PlayersDistance:StopDistanceData()
 	end
 end
 
@@ -484,7 +690,6 @@ function module:Load(...)
 		init_weapon_signal(types) -- "players weapons"
 		init_health_bar_signal(self,types) -- "beast health bar"
 		init_nightvision_signal(self,types) -- "survivor nv"
-		init_TFlashlight_signal(self,types) -- "toggle survivor light"
 		init_beast_temp_health_bar(self,types) -- "beast energy bar"
 		init_ability(self,types) -- "beast ability, ability charge"
 	end)
@@ -502,6 +707,14 @@ function module:Load(...)
 			if(Players.LocalPlayer.PlayerGui:WaitForChild("MenuGui").GameResults.Visible == true) then
 				Players.LocalPlayer.PlayerGui:WaitForChild("MenuGui").GameResults.Visible = false
 			end
+			if(GameService:isGameStarted() == true) then
+				local game_info = Players.LocalPlayer.PlayerGui.MenuGui.GameInfo
+				game_info.Text = "Round in progress. (Wait until the game end)"
+				Players.LocalPlayer.PlayerGui:WaitForChild("MenuGui").Enabled = true
+				SoundService:PlayLocalSound(SoundService["door open metal"])
+				TweenService:Create(Players.LocalPlayer.PlayerGui:WaitForChild("MenuGui").MainFrame.GuiWall1,TweenInfo.new(2.9),{Position = UDim2.fromScale(0,-0.9)}):Play()
+				TweenService:Create(Players.LocalPlayer.PlayerGui:WaitForChild("MenuGui").MainFrame.GuiWall2,TweenInfo.new(2.9),{Position = UDim2.fromScale(0,1.2)}):Play()
+			end
 			if(self.health_bar_initialised) then
 				init_health_bar_signal(self,"beast")
 				local beast_gui = Players.LocalPlayer.PlayerGui:WaitForChild("BeastGui")
@@ -511,18 +724,19 @@ function module:Load(...)
 			if(self.nv_initialised) then
 				init_nightvision_signal(self,"survivor")
 			end
-			if(self.temp_maid_signal) then
-				init_TFlashlight_signal(self,"survivor")
-			end
 			if(self.temp_health_bar_signal) then
 				init_beast_temp_health_bar(self,"beast")
 			end
 			if(self.ability_component_data) then
 				init_ability(self,"beast")
 			end
+			ToolsSignal:UnregisterAll()
 			WeaponsService:DestroyPlayerComponent()
 			return
 		end
+		ToolsSignal:UnregisterAll()
+		TweenService:Create(Players.LocalPlayer.PlayerGui:WaitForChild("MenuGui").MainFrame.GuiWall1,TweenInfo.new(0.2),{Position = UDim2.fromScale(0,-0.1)}):Play()
+		TweenService:Create(Players.LocalPlayer.PlayerGui:WaitForChild("MenuGui").MainFrame.GuiWall2,TweenInfo.new(0.2),{Position = UDim2.fromScale(0,0.5)}):Play()
 		if(self.health_bar_initialised) then
 			init_health_bar_signal(self,"beast")
 			local beast_gui = Players.LocalPlayer.PlayerGui:WaitForChild("BeastGui")
@@ -532,15 +746,14 @@ function module:Load(...)
 		if(self.nv_initialised) then
 			init_nightvision_signal(self,"survivor")
 		end
-		if(self.temp_maid_signal) then
-			init_TFlashlight_signal(self,"survivor")
-		end
 		if(self.temp_health_bar_signal) then
 			init_beast_temp_health_bar(self,"beast")
 		end
 		if(self.ability_component_data) then
 			init_ability(self,"beast")
 		end
+		Players.LocalPlayer.PlayerGui:WaitForChild("MenuGui").MainFrame.GuiWall1.desc.Text = "GAME ENDS"
+		Players.LocalPlayer.PlayerGui:WaitForChild("MenuGui").MainFrame.GuiWall2.desc.Text = "NEXT ROUND WILL START SHORTLY"
 		WeaponsService:DestroyPlayerComponent()
 		if(state ~= "damage_total_taken") then 
 			Players.LocalPlayer.PlayerGui:WaitForChild("MenuGui").GameResults.status.Text = "The beast has won"
@@ -551,6 +764,21 @@ function module:Load(...)
 		end
 		Players.LocalPlayer.PlayerGui:WaitForChild("MenuGui").Enabled = true
 		Players.LocalPlayer.PlayerGui:WaitForChild("MenuGui").GameResults.Visible = true
+		task.delay(2,function()
+			Players.LocalPlayer.PlayerGui:WaitForChild("MenuGui").MainFrame.GuiWall1.desc.Text = ""
+			Players.LocalPlayer.PlayerGui:WaitForChild("MenuGui").MainFrame.GuiWall2.desc.Text = ""
+		end)
+		if(state ~= "damage_total_taken") then return end
+		local calcul = 0
+		for i,stats in pairs(data) do
+			if(type(stats) == "table") then
+				for j,stat in pairs(stats) do
+					if(type(stat) == "number") then
+						calcul += stat
+					end 
+				end
+			end
+		end
 		for i,stats in pairs(data) do
 			if(type(stats) == "table") then
 				for j,stat in pairs(stats) do
@@ -565,17 +793,15 @@ function module:Load(...)
 				end
 			end
 		end
-		if(state ~= "damage_total_taken") then return end
-		local calcul = 0
-		for i,stats in pairs(data) do
-			if(type(stats) == "table") then
-				for j,stat in pairs(stats) do
-					if(type(stat) == "number") then
-						calcul += stat
-					end 
+		task.delay(2,function()
+			Players.LocalPlayer.PlayerGui:WaitForChild("MenuGui").GameResults.Visible = false
+			for i,frame in pairs(Players.LocalPlayer.PlayerGui:WaitForChild("MenuGui").GameResults.Damages.ScrollingFrame:GetChildren()) do
+				if(frame:IsA("TextLabel")) then
+					frame:Destroy()
 				end
 			end
-		end
+			Players.LocalPlayer.PlayerGui:WaitForChild("MenuGui").GameResults.total.Text = ("The Beast took 0 total damage")
+		end)
 		Players.LocalPlayer.PlayerGui:WaitForChild("MenuGui").GameResults.total.Text = ("The Beast took %d total damage"):format(calcul)
 	end)
 end
