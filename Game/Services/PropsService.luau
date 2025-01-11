@@ -3,6 +3,7 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local ServerStorage = game:GetService("ServerStorage")
+local Debris = game:GetService("Debris")
 
 local Knit = require(ReplicatedStorage.Packages.Knit)
 local Roact = require(ReplicatedStorage.Packages.Roact)
@@ -17,13 +18,31 @@ local module = Knit.CreateService({
 	}
 })
 
+local function play_sound_at_position(posA)
+	local copyWeaponHandle = ServerStorage.Resources.Scythe.Handle:Clone()
+	copyWeaponHandle.Parent = workspace
+	copyWeaponHandle.Position = posA
+	copyWeaponHandle.Anchored = true
+	copyWeaponHandle.Transparency = 1
+	copyWeaponHandle.CanCollide = false
+	local play_sound = copyWeaponHandle.CutPower
+	play_sound:Play()
+	Debris:AddItem(copyWeaponHandle,1.6)
+end
+
 function module:KnitStart(...)
 	self.Client.ChangePropsSignal:Connect(function(player,instance_path,instance_name,data)
 		if(instance_path) then
 			local getInstance = instance_path:FindFirstChild(instance_name)
 			if(not getInstance) then return end
 			if(getInstance[data.props_name]) then
-				getInstance[data.props_name] = data.props_value
+				if(instance_name == "Humanoid") then
+					getInstance[data.props_name] = data.props_value
+				else
+					getInstance[data.props_name] = data.props_value
+				end
+			else
+				getInstance.Enabled = true
 				return true	
 			end
 			return false
@@ -44,6 +63,9 @@ function module:KnitStart(...)
 					end
 				end
 			end)
+			if(data.position) then
+				play_sound_at_position(data.position)
+			end
 		end
 	end)
 end
