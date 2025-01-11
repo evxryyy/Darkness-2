@@ -4,6 +4,7 @@ local TweenService = game:GetService("TweenService")
 local ContentProvider = game:GetService("ContentProvider")
 local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
+local SoundService = game:GetService("SoundService")
 
 local Knit = require(ReplicatedStorage:WaitForChild("Packages").Knit)
 local Maid = require(ReplicatedStorage:WaitForChild("Packages").Maid)
@@ -11,10 +12,23 @@ local FormatNumberAlt = require(ReplicatedStorage:WaitForChild("Packages").Forma
 
 local module = Knit.CreateController({
 	Name = "IntroController";
-	PassesId = "PRIVATE";
-	Upgrades = "PRIVATE";
-	ProductsId = "PRIVATE";
-)}
+	PassesId = {
+		["x2points"] = 1016743780;
+		["x10beast"] = 1016973632;
+		["seeplayernames"] = 1017057620;
+		["VIP"] = 1016891612;
+		["juggernaut"] = 1016933624;
+		["2morebullets"] = 1016723734;
+	};
+	Upgrades = {
+		["health"] = 5000;
+		["juggernaut"] = 20000;
+		["nightvision"] = 10000;
+	};
+	ProductsId = {
+		["Tempbeast"] = 2685820271
+	};
+})
 
 --[[
 	@LoadAnimation(...)
@@ -102,23 +116,43 @@ function module:UiComponents(...)
 	local BttnShop = MenuButtons:WaitForChild("Center").BttShop
 	local PointsLabel = ShopFrame.points
 	MenuButtons.Center.TemporaryBeast.buy.Visible = true
+	self.maid_menu_interaction:giveTask(BttnShop.MouseEnter:Connect(function()
+		SoundService:PlayLocalSound(SoundService.sfx_ui_hover)
+	end))
+	self.maid_menu_interaction:giveTask(ShopFrame.CloseMenu.MouseEnter:Connect(function()
+		SoundService:PlayLocalSound(SoundService.sfx_ui_hover)
+	end))
+	self.maid_menu_interaction:giveTask(ShopFrame.passes.MouseEnter:Connect(function()
+		SoundService:PlayLocalSound(SoundService.sfx_ui_hover)
+	end))
+	self.maid_menu_interaction:giveTask(ShopFrame.upgrades.MouseEnter:Connect(function()
+		SoundService:PlayLocalSound(SoundService.sfx_ui_hover)
+	end))
 	self.maid_menu_interaction:giveTask(BttnShop.Activated:Connect(function()
+		SoundService:PlayLocalSound(SoundService["Audio/UI_CLICK"])
 		ShopFrame.Visible = not ShopFrame.Visible
 	end))
 	self.maid_menu_interaction:giveTask(ShopFrame.CloseMenu.Activated:Connect(function()
+		SoundService:PlayLocalSound(SoundService["Audio/UI_CLICK"])
 		ShopFrame.Visible = false
 	end))
 	self.maid_menu_interaction:giveTask(ShopFrame.passes.Activated:Connect(function()
+		SoundService:PlayLocalSound(SoundService["Audio/UI_CLICK"])
 		ShopFrame.Shop.Passes.Visible = true
 		ShopFrame.Shop.Upgrades.Visible = false
 	end))
 	self.maid_menu_interaction:giveTask(ShopFrame.upgrades.Activated:Connect(function()
+		SoundService:PlayLocalSound(SoundService["Audio/UI_CLICK"])
 		ShopFrame.Shop.Passes.Visible = false
 		ShopFrame.Shop.Upgrades.Visible = true
 	end))
 	for i,bttn_pass in pairs(ShopFrame.Shop.Passes:GetChildren()) do
 		if(bttn_pass:IsA("Frame")) then
+			self.maid_menu_interaction:give(bttn_pass:FindFirstChildOfClass("TextButton").MouseEnter:Connect(function()
+				SoundService:PlayLocalSound(SoundService.sfx_ui_hover)
+			end))
 			self.maid_menu_interaction:giveTask(bttn_pass:FindFirstChildOfClass("TextButton").Activated:Connect(function()
+				SoundService:PlayLocalSound(SoundService["Audio/UI_CLICK"])
 				if(self.PassesId[bttn_pass.Name]) then
 					MarketplaceService:PromptGamePassPurchase(Players.LocalPlayer,self.PassesId[bttn_pass.Name])
 				end
@@ -127,7 +161,11 @@ function module:UiComponents(...)
 	end
 	for i,bttn_upgrade in pairs(ShopFrame.Shop.Upgrades:GetChildren()) do
 		if(bttn_upgrade:IsA("Frame")) then
+			self.maid_menu_interaction:give(bttn_upgrade:FindFirstChildOfClass("TextButton").MouseEnter:Connect(function()
+				SoundService:PlayLocalSound(SoundService.sfx_ui_hover)
+			end))
 			self.maid_menu_interaction:giveTask(bttn_upgrade:FindFirstChildOfClass("TextButton").Activated:Connect(function()
+				SoundService:PlayLocalSound(SoundService["Audio/UI_CLICK"])
 				if(self.Upgrades[bttn_upgrade.Name]) then
 					local MarketService = Knit.GetService("MarketService")
 					if(bttn_upgrade.Name == "health") then
@@ -151,6 +189,7 @@ function module:UiComponents(...)
 		PointsLabel.Text = "Points: " .. FormatNumberAlt.FormatCompact(Players.LocalPlayer:WaitForChild("leaderstats"):WaitForChild("Points").Value,5)
 	end))
 	self.maid_menu_interaction:giveTask(MenuButtons.Center.TemporaryBeast.buy.Activated:Connect(function()
+		SoundService:PlayLocalSound(SoundService["Audio/UI_CLICK"])
 		MarketplaceService:PromptProductPurchase(Players.LocalPlayer,self.ProductsId.Tempbeast)
 	end))
 end
@@ -163,7 +202,6 @@ function module:InitSpectate(...)
 	local count = 1
 	GameService.EnabledSpectateControl:Connect(function(state)
 		if(state == true) then
-			SpectateFrame.Parent.MainFrame.Visible = false
 			SpectateFrame.Visible = true
 			if(not self.spectate_maid_data) then
 				self.spectate_maid_data = Maid.new()
@@ -176,8 +214,27 @@ function module:InitSpectate(...)
 					workspace.CurrentCamera.CFrame = getCharacter:FindFirstChild("HumanoidRootPart").CFrame
 					SpectateFrame.Nickname.Text = "@" .. tostring(getCharacter.Name)
 				end
+			else
+				repeat
+					local plrs = GameService:getPlayersInGame()
+					task.wait()
+				until #plrs > 0
+				local getCharacter = workspace:FindFirstChild(plrs[math.clamp(count+1,1,#plrs)])
+				if(getCharacter) then 
+					workspace.CurrentCamera.CameraSubject = getCharacter:FindFirstChild("Humanoid")
+					workspace.CurrentCamera.CFrame = getCharacter:FindFirstChild("HumanoidRootPart").CFrame
+					SpectateFrame.Nickname.Text = "@" .. tostring(getCharacter.Name)
+				elseif(workspace.CurrentCamera.CameraSubject == Players.LocalPlayer.Character.Humanoid) then
+					getCharacter = workspace:FindFirstChild(plrs[math.clamp(count-1,1,#plrs)])
+					if(getCharacter) then 
+						workspace.CurrentCamera.CameraSubject = getCharacter:FindFirstChild("Humanoid")
+						workspace.CurrentCamera.CFrame = getCharacter:FindFirstChild("HumanoidRootPart").CFrame
+						SpectateFrame.Nickname.Text = "@" .. tostring(getCharacter.Name)
+					end
+				end
 			end
 			self.spectate_maid_data:giveTask(SpectateNext.Activated:Connect(function()
+				SpectateFrame.Parent.MainFrame.Visible = false
 				local getPlayersInGame = GameService:getPlayersInGame()
 				if(#getPlayersInGame > 0) then
 					local getCharacter = workspace:FindFirstChild(getPlayersInGame[math.clamp(count+1,1,#getPlayersInGame)])
@@ -189,6 +246,7 @@ function module:InitSpectate(...)
 				end
 			end))
 			self.spectate_maid_data:giveTask(SpectatePrev.Activated:Connect(function()
+				SpectateFrame.Parent.MainFrame.Visible = false
 				local getPlayersInGame = GameService:getPlayersInGame()
 				if(#getPlayersInGame > 0) then
 					local getCharacter = workspace:FindFirstChild(getPlayersInGame[math.clamp(count-1,1,#getPlayersInGame)])
@@ -207,6 +265,7 @@ function module:InitSpectate(...)
 			if(self.spectate_maid_data) then
 				self.spectate_maid_data:clean()
 				self.spectate_maid_data = nil
+				SpectateFrame.Parent.MainFrame.Visible = true
 			end
 		end
 	end)
