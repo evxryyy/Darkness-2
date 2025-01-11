@@ -7,8 +7,11 @@ local ServerStorage = game:GetService("ServerStorage")
 local Knit = require(ReplicatedStorage.Packages.Knit)
 local Roact = require(ReplicatedStorage.Packages.Roact)
 local Signal = require(ReplicatedStorage.Packages.Signal)
+local Promise = require(ReplicatedStorage.Packages.Promise)
 local TableUtil = require(ReplicatedStorage.Packages.TableUtil)
 local PlayerEventTracker = require(ReplicatedStorage.Packages.PlayerEventTracker)
+local WeaponsComponent = require(ServerScriptService.Game.Utils.WeaponsComponent)
+local DropsComponent = require(ServerScriptService.Game.Utils.DropsComponent)
 local ElectricDoorComponent = require(ServerScriptService.Game.Utils.ElectricDoorComponent)
 
 local module = Knit.CreateService({
@@ -23,8 +26,8 @@ local module = Knit.CreateService({
 	};
 	State = {
 		started = false;
-		intermission = 5;
-		player_amount_min = 1;
+		intermission = 30;
+		player_amount_min = 4;
 		StartSignal = Signal.new();
 		current_signal_started = nil;
 		MapChoosen = "[^/%p]";
@@ -99,6 +102,17 @@ local function randomBeastSpawn(map)
 	return spawns[math.random(1,#spawns)].CFrame
 end
 
+local function setLightToHRP(player_character)
+	if(not player_character) then return end
+	local light = Instance.new("PointLight",player_character.HumanoidRootPart)
+	light.Brightness = 2
+	light.Color = Color3.new(1, 1, 1)
+	light.Shadows = true
+	light.Range = 12
+	light.Name = "PlayerLightComponent"
+	return light
+end
+
 function module:LoadingStartSignal(...)
 	if(not self.State) then return end
 	if(not self.State.started) then return end
@@ -114,20 +128,29 @@ function module:LoadingStartSignal(...)
 			end
 		end
 		self.State.MapChoosen = clone.Name
-		local __data__ = self:LoadGame()
 		if(clone:FindFirstChild("MapParts")) then
 			for i,object in pairs(clone.MapParts:GetChildren()) do
 				if(string.find(object.Name,"ElectricalDoor")) then
-					local class = ElectricDoorComponent.new(object)
+					Promise.new(function()
+						local class = ElectricDoorComponent.new(object)
+					end):catch(warn)
 				end
 			end
 		else
 			for i,object in pairs(clone.Furniture:GetChildren()) do
 				if(string.find(object.Name,"ElectricalDoor")) then
-					local class = ElectricDoorComponent.new(object)
+					Promise.new(function()
+						local class = ElectricDoorComponent.new(object)
+					end):catch(warn)
 				end
 			end
 		end
+		--[Disabled cause DropsComponent already drop NV-Battery]
+		--for i,WeaponParts in pairs(clone.MapData.WeaponDrops:GetChildren()) do
+		--	--WeaponsComponent.SpawnNVBatteryAtLocation(WeaponsComponent,WeaponParts.Position)
+		--end
+		DropsComponent:StartDrops()
+		local __data__ = self:LoadGame()
 	end	
 end
 
@@ -157,12 +180,14 @@ function module:LoadGame(map_name)
 			if(not getPlayerFromName) then continue end
 			local profile = Knit.GetService("ProfileStoreService"):GetProfile(getPlayerFromName)
 			data[players] = Random.new():NextInteger(1,10)
-			if(profile.Data.Products.temp_beast) then
-				data[players] += 100
-				Knit.GetService("MarketService"):RemoveProductFromData(getPlayerFromName,"temp_beast")
-			end
-			if(profile.Data.Products["10x beast"]) then
-				data[players] += 10
+			if(profile) then
+				if(profile.Data.Products.temp_beast) then
+					data[players] += 100
+					Knit.GetService("MarketService"):RemoveProductFromData(getPlayerFromName,"temp_beast")
+				end
+				if(profile.Data.Products["10x beast"]) then
+					data[players] += 5
+				end
 			end
 		end
 	end
@@ -173,11 +198,13 @@ function module:LoadGame(map_name)
 			local getPlayerFromName = Players:FindFirstChild(players)
 			if(not getPlayerFromName) then continue end
 			local profile = Knit.GetService("ProfileStoreService"):GetProfile(getPlayerFromName)
-			if(profile.Data.Products["3x juggernaut"]) then
-				value += 3
-			end
-			if(profile.Data.Products["juggernaut"]) then
-				value += 3
+			if(profile) then
+				if(profile.Data.Products["3x juggernaut"]) then
+					value += 3
+				end
+				if(profile.Data.Products["juggernaut"]) then
+					value += 3
+				end
 			end
 		end
 		remove(copy,beastChoosen)
@@ -208,45 +235,19 @@ function module:LoadGame(map_name)
 		end
 		local character = player.Character or player.CharacterAdded:Wait()
 		local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-		local lightExistInHrp = humanoidRootPart:FindFirstChild("light")
-		if(not lightExistInHrp) then
-			addInstanceToChar(humanoidRootPart,"PointLight",{
-				Color = Color3.fromRGB(214, 214, 0);
-				Brightness = 2;
-				Shadows = true;
-				Range = 10
-			},"light")
-			self.Client.InitComponentsSignal:Fire(player,"survivor")
-			self.State.playersStats[player.Name] = {}
-			PlayerEventTracker:TrackUser(player,player.Character.Humanoid.Died,function()
-				if(self.State.playersStats[player.Name]) then
-					table.clear(self.State.playersStats[player.Name])
-					self.State.playersStats[player.Name] = nil
-					self.Client.EnabledSpectateControl:Fire(player,true)
-					self.Client.InitGameResults:Fire(player,"dead")
-				end
-				PlayerEventTracker:UntrackUser(player.Name)
-			end)
-		else
-			addInstanceToChar(humanoidRootPart,"PointLight",{
-				Color = Color3.fromRGB(214, 214, 0);
-				Brightness = 2;
-				Shadows = true;
-				Range = 10
-			},"light")
-			self.Client.InitComponentsSignal:Fire(player,"survivor")
-			self.State.playersStats[player.Name] = {}
-			PlayerEventTracker:TrackUser(player,player.Character.Humanoid.Died,function()
-				if(self.State.playersStats[player.Name]) then
-					table.clear(self.State.playersStats[player.Name])
-					self.State.playersStats[player.Name] = nil
-					self.Client.EnabledSpectateControl:Fire(player,true)
-					self.Client.InitGameResults:Fire(player,"dead")
-				end
-				PlayerEventTracker:UntrackUser(player.Name)
-			end)
-			return
-		end
+		self.Client.InitComponentsSignal:Fire(player,"survivor")
+		self.State.playersStats[player.Name] = {}
+		local instance_data = setLightToHRP(character)
+		PlayerEventTracker:TrackUser(player,player.Character.Humanoid.Died,function()
+			if(self.State.playersStats[player.Name]) then
+				table.clear(self.State.playersStats[player.Name])
+				self.State.playersStats[player.Name] = nil
+				self.Client.EnabledSpectateControl:Fire(player,true)
+				self.Client.InitGameResults:Fire(player,"dead")
+			end
+			instance_data:Destroy()
+			PlayerEventTracker:UntrackUser(player.Name)
+		end)
 	end,randomPlayerSpawn(self.State.MapChoosen))
 	each(beastChoosen,function(a0,a1) 
 		setSpawn(a0,a1)
@@ -259,53 +260,50 @@ function module:LoadGame(map_name)
 		end
 		local character = player.Character or player.CharacterAdded:Wait()
 		local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-		local lightExistInHrp = humanoidRootPart:FindFirstChild("light")
-		if(not lightExistInHrp) then
-			addInstanceToChar(humanoidRootPart,"PointLight",{
-				Color = Color3.fromRGB(255, 0, 0);
-				Brightness = 2;
-				Shadows = true;
-				Range = 15
-			},"light")
-			addInstanceToChar(character,"StringValue",{Value = "Beast"},"mode_selector")
-			local copyDamageGui = ServerStorage.Resources.DamageSign:Clone()
-			copyDamageGui.Parent = character.Head
-			character.Humanoid.MaxHealth = 250
-			character.Humanoid.WalkSpeed = 26
-			character.Humanoid.Health = character.Humanoid.MaxHealth
-			self.Client.InitComponentsSignal:Fire(player,"beast")
-			self.State.beastStats[player.Name] = {}
-			PlayerEventTracker:TrackUser(player,player.Character.Humanoid.Died,function()
-				if(self.State.beastStats[player.Name]) then
-					table.clear(self.State.beastStats[player.Name])
-					self.State.beastStats[player.Name] = nil
-				end
-				PlayerEventTracker:UntrackUser(player.Name)
-			end)
-		else
-			addInstanceToChar(humanoidRootPart,"PointLight",{
-				Color = Color3.fromRGB(255, 0, 0);
-				Brightness = 2;
-				Shadows = true;
-				Range = 15
-			},"light")
-			addInstanceToChar(character,"StringValue",{Value = "Beast"},"mode_selector")
-			local copyDamageGui = ServerStorage.Resources.DamageSign:Clone()
-			copyDamageGui.Parent = character.Head
-			character.Humanoid.MaxHealth = 250
-			character.Humanoid.WalkSpeed = 26
-			character.Humanoid.Health = character.Humanoid.MaxHealth
-			self.Client.InitComponentsSignal:Fire(player,"beast")
-			self.State.beastStats[player.Name] = {}
-			PlayerEventTracker:TrackUser(player,player.Character.Humanoid.Died,function()
-				if(self.State.beastStats[player.Name]) then
-					table.clear(self.State.beastStats[player.Name])
-					self.State.beastStats[player.Name] = nil
-				end
-				PlayerEventTracker:UntrackUser(player.Name)
-			end)
-			return
+		addInstanceToChar(character.Humanoid,"HumanoidDescription",{
+			RightArm = 0;
+			RightArmColor = Color3.fromRGB(0,0,0);
+			LeftArm = 0;
+			LeftArmColor = Color3.fromRGB(0,0,0);
+			RightLeg = 0;
+			RightLegColor = Color3.fromRGB(0,0,0);
+			LeftLeg = 0;
+			LeftLegColor = Color3.fromRGB(0,0,0);
+			Torso = 0;
+			TorsoColor = Color3.fromRGB(0,0,0);
+			Head = 0;
+			HeadColor = Color3.fromRGB(0,0,0);
+			HatAccessory = 0;
+			BackAccessory = 0;
+			HairAccessory = 0;
+			FaceAccessory = 0;
+			FrontAccessory = 0;
+			ShouldersAccessory = 0;
+			WaistAccessory = 0;
+			NeckAccessory = 0
+		},"BeastTransformDescription")
+		for i,character_part in pairs(character:GetChildren()) do
+			if(character_part:IsA("Part")) then
+				character_part.Transparency = 0.3
+				character_part.Color = Color3.new(0,0,0)
+			end
 		end
+		character.Humanoid:ApplyDescription(character.Humanoid:FindFirstChild("BeastTransformDescription"))
+		addInstanceToChar(character,"StringValue",{Value = "Beast"},"mode_selector")
+		local copyDamageGui = ServerStorage.Resources.DamageSign:Clone()
+		copyDamageGui.Parent = character.Head
+		character.Humanoid.MaxHealth = 250
+		character.Humanoid.WalkSpeed = 26
+		character.Humanoid.Health = character.Humanoid.MaxHealth
+		self.Client.InitComponentsSignal:Fire(player,"beast")
+		self.State.beastStats[player.Name] = {}
+		PlayerEventTracker:TrackUser(player,player.Character.Humanoid.Died,function()
+			if(self.State.beastStats[player.Name]) then
+				table.clear(self.State.beastStats[player.Name])
+				self.State.beastStats[player.Name] = nil
+			end
+			PlayerEventTracker:UntrackUser(player.Name)
+		end)
 	end,randomBeastSpawn(self.State.MapChoosen))
 	each(juggernautChoosen,function(a0,a1) 
 		setSpawn(a0,a1)
@@ -318,58 +316,39 @@ function module:LoadGame(map_name)
 			return
 		end
 		local profile = Knit.GetService("ProfileStoreService"):GetProfile(player)
+		player.Character:FindFirstChild("Humanoid").MaxHealth += 50
+		player.Character:FindFirstChild("Humanoid").Health = player.Character:FindFirstChild("Humanoid").MaxHealth
 		if(profile) then
 			if(profile.Data.Products.VIP) then
-				player.Character:FindFirstChild("Humanoid").MaxHealth = 140
-				player.Character:FindFirstChild("Humanoid").Health = 140
+				player.Character:FindFirstChild("Humanoid").MaxHealth += 20
+				player.Character:FindFirstChild("Humanoid").Health = player.Character:FindFirstChild("Humanoid").MaxHealth
 			end
 		end
 		local character = player.Character or player.CharacterAdded:Wait()
 		local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-		local lightExistInHrp = humanoidRootPart:FindFirstChild("light")
-		if(not lightExistInHrp) then
-			addInstanceToChar(humanoidRootPart,"PointLight",{
-				Color = Color3.fromRGB(0, 255, 255);
-				Brightness = 2;
-				Shadows = true;
-				Range = 10
-			},"light")
-			self.Client.InitComponentsSignal:Fire(player,"juggernaut")
-			self.State.playersStats[player.Name] = {}
-			PlayerEventTracker:TrackUser(player,player.Character.Humanoid.Died,function()
-				if(self.State.playersStats[player.Name]) then
-					table.clear(self.State.playersStats[player.Name])
-					self.State.playersStats[player.Name] = nil
-					self.Client.EnabledSpectateControl:Fire(player,true)
-					self.Client.InitGameResults:Fire(player,"dead")
-				end
-				PlayerEventTracker:UntrackUser(player.Name)
-			end)
-		else
-			lightExistInHrp:Destroy()
-			addInstanceToChar(humanoidRootPart,"PointLight",{
-				Color = Color3.fromRGB(0, 255, 255);
-				Brightness = 2;
-				Shadows = true;
-				Range = 10
-			},"light")
-			self.Client.InitComponentsSignal:Fire(player,"juggernaut")
-			self.State.playersStats[player.Name] = {}
-			PlayerEventTracker:TrackUser(player,player.Character.Humanoid.Died,function()
-				if(self.State.playersStats[player.Name]) then
-					table.clear(self.State.playersStats[player.Name])
-					self.State.playersStats[player.Name] = nil
-					self.Client.EnabledSpectateControl:Fire(player,true)
-					self.Client.InitGameResults:Fire(player,"dead")
-				end
-				PlayerEventTracker:UntrackUser(player.Name)
-			end)
-			return
-		end
+		local cloneJuggernautSign = ServerStorage.Resources.JuggernautSign:Clone()
+		cloneJuggernautSign.Parent = character.Head
+		local instance_data = setLightToHRP(character)
+		self.Client.InitComponentsSignal:Fire(player,"juggernaut")
+		self.State.playersStats[player.Name] = {}
+		PlayerEventTracker:TrackUser(player,player.Character.Humanoid.Died,function()
+			if(self.State.playersStats[player.Name]) then
+				table.clear(self.State.playersStats[player.Name])
+				self.State.playersStats[player.Name] = nil
+				self.Client.EnabledSpectateControl:Fire(player,true)
+				self.Client.InitGameResults:Fire(player,"dead")
+				instance_data:Destroy()
+			end
+			PlayerEventTracker:UntrackUser(player.Name)
+		end)
 	end,randomPlayerSpawn(self.State.MapChoosen))
 	self:UpdateGameData({Survivors = survivors,Juggernaut = juggernautChoosen,Beast = beastChoosen})
 	for i,plr in pairs(Players:GetPlayers()) do
-		if(not self.State.playersStats[plr.Name] or self.State.beastStats[plr.Name]) then
+		if(self.State.beastStats[plr.Name]) then continue end
+		if(self.State.playersStats[plr.Name]) then continue end
+		if(not self.State.playersStats[plr.Name]) then
+			self.Client.EnabledSpectateControl:Fire(plr,true)
+		elseif(not self.State.beastStats[plr.Name]) then
 			self.Client.EnabledSpectateControl:Fire(plr,true)
 		end
 	end
@@ -410,7 +389,7 @@ function module:UpdateGameData(data)
 		if(value <= 0) then
 			signal:Fire("beast-loose")	
 		elseif(survivor_value <= 0) then
-			--signal:Fire("survivor-loose")
+			signal:Fire("survivor-loose")
 		end
 	end)
 	signal:Once(function(ref)
@@ -421,6 +400,7 @@ function module:UpdateGameData(data)
 			local copy_beast_data = TableUtil.Copy(self.State.beastStats,true)
 			self.Client.InitGameResults:FireAll(copy_beast_data)
 		end
+		DropsComponent:CancelDrops()
 		self.State.heartbeat_thread:Disconnect()
 		self.State.heartbeat_thread = nil
 		self.State.beastStats = {}
@@ -441,14 +421,24 @@ function module:UpdateGameData(data)
 				for i,tool in pairs(plr.Character:GetChildren()) do
 					if(tool:IsA("Tool")) then
 						tool:Destroy()
+					elseif(tool.Name == "mode_selector") then
+						tool:Destroy()
+					elseif(tool.Name == "JuggernautSign") then
+						tool:Destroy()
+					elseif(tool.Name == "HumanoidRootPart") then
+						if(tool:FindFirstChildOfClass("PointLight")) then
+							tool:FindFirstChildOfClass("PointLight"):Destroy()
+						end
+					elseif(tool.Name == "Shield") then
+						tool:Destroy()
 					end
 				end
 			end
 			if(PlayerEventTracker:GetUserTracker(plr.Name)) then
 				PlayerEventTracker:UntrackUser(plr.Name)
 			end
-			plr.Character.HumanoidRootPart.CFrame = workspace.Lobby.SpawnLocation.CFrame
 		end
+		WeaponsComponent.CleanNVBattery(WeaponsComponent)
 		ElectricDoorComponent:CleanAll()
 		workspace:FindFirstChild(self.State.MapChoosen):Destroy()
 		self.State.MapChoosen = "[^/%p]"
@@ -465,7 +455,7 @@ function module:UpdateGameData(data)
 				if(self.State.current_signal_started) then
 					self.State.StartSignal:Fire("Cancelling game intermission")
 				end
-				self.Client.UpdateClientSignal:FireAll("Darkness 2 need 4 players to start.")
+				self.Client.UpdateClientSignal:FireAll(("Darkness 2 need %d players to start."):format(self.State.player_amount_min))
 			end
 		end)
 	end)
@@ -548,7 +538,7 @@ function module:KnitStart(...)
 			if(self.State.current_signal_started) then
 				self.State.StartSignal:Fire("Cancelling game intermission")
 			end
-			self.Client.UpdateClientSignal:FireAll("Darkness 2 need 4 players to start.")
+			self.Client.UpdateClientSignal:FireAll(("Darkness 2 need %d players to start."):format(self.State.player_amount_min))
 		end
 	end)
 	Players.PlayerRemoving:Connect(function(player : Player)
@@ -564,7 +554,7 @@ function module:KnitStart(...)
 			if(self.State.current_signal_started) then
 				self.State.StartSignal:Fire("Cancelling game intermission")
 			end
-			self.Client.UpdateClientSignal:FireAll("Darkness 2 need 4 players to start.")
+			self.Client.UpdateClientSignal:FireAll(("Darkness 2 need %d players to start."):format(self.State.player_amount_min))
 		end
 		if(self.State.playersStats[player.Name]) then
 			table.clear(self.State.playersStats[player.Name])
